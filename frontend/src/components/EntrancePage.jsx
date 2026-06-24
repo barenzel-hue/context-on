@@ -74,7 +74,7 @@ export default function EntrancePage({ onEnter }) {
             Context<span className="text-accent">On</span>
           </h1>
           <p className="mt-2 text-sm text-gray-400">
-            Understand <em>why</em> code was written this way
+            Stop guessing. Start knowing.
           </p>
         </div>
 

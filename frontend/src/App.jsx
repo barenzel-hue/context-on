@@ -279,6 +279,7 @@ export default function App() {
     const question = input.trim()
     if (!question || sending) return
     setInput('')
+    setActiveTab('explanation')
     const history = messages
     setMessages((prev) => [...prev, { role: 'user', content: question }])
     setSending(true)
@@ -317,7 +318,7 @@ export default function App() {
           <h1 className="text-xl font-bold tracking-tight text-white">
             Context<span className="text-accent">On</span>
           </h1>
-          <p className="text-xs text-gray-500">Understand why code exists</p>
+          <p className="text-xs text-gray-500">Stop guessing. Start knowing.</p>
         </div>
         {phase === 'answered' && (
           <button
