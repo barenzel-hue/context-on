@@ -180,7 +180,7 @@ function IdleScreen({ onSubmit }) {
     <div className="flex h-full flex-col items-center justify-center px-4">
       <div className="w-full max-w-xl space-y-6 text-center">
         <div>
-          <h2 className="text-xl font-semibold text-white">What would you like to understand?</h2>
+          <h2 className="text-3xl font-semibold tracking-tight text-white">What would you like to understand?</h2>
           <p className="mt-1 text-sm text-gray-500">
             Ask about any code — get the why, not just the what.
           </p>
@@ -192,7 +192,7 @@ function IdleScreen({ onSubmit }) {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Ask why this code exists..."
+            placeholder="Why was this change made?"
             className="flex-1 rounded-xl border border-surface-border bg-surface-raised px-4 py-3 text-sm text-gray-200 placeholder-gray-600 outline-none transition-colors focus:border-accent"
           />
           <button
