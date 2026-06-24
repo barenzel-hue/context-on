@@ -5,12 +5,13 @@ import { sendChatMessage } from '../api'
 const STORAGE_KEY = 'contexton-chat'
 
 const SUGGESTIONS = [
-  'What problem does this code solve?',
-  'Is there any risk I should know about?',
+  'Why does this code exist in the system?',
+  'Why was this feature added?',
+  'Is this implementation temporary or permanent?',
   'What should I be careful about if I change this?',
 ]
 
-export default function ChatPanel({ disabled, resetKey }) {
+export default function ChatPanel({ disabled, resetKey, pendingQuestion, onPendingConsumed }) {
   const [messages, setMessages] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem(STORAGE_KEY)) ?? []
@@ -34,6 +35,13 @@ export default function ChatPanel({ disabled, resetKey }) {
   }, [resetKey])
 
   useEffect(() => {
+    if (pendingQuestion && !disabled) {
+      handleSend(pendingQuestion)
+      onPendingConsumed?.()
+    }
+  }, [pendingQuestion, disabled])
+
+  useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
@@ -41,12 +49,13 @@ export default function ChatPanel({ disabled, resetKey }) {
     const question = (text ?? input).trim()
     if (!question || sending || disabled) return
 
+    const currentMessages = messages
     setInput('')
     setMessages((prev) => [...prev, { role: 'user', content: question }])
     setSending(true)
 
     try {
-      const { reply } = await sendChatMessage(question)
+      const { reply } = await sendChatMessage(question, currentMessages)
       setMessages((prev) => [...prev, { role: 'assistant', content: reply }])
     } catch (err) {
       setMessages((prev) => [
@@ -88,7 +97,7 @@ export default function ChatPanel({ disabled, resetKey }) {
         {messages.length === 0 && !disabled && (
           <div className="space-y-3">
             <p className="text-sm text-gray-500">
-              Ask anything — why it was written this way, what it does, what to watch out for.
+              Ask anything — using context from the codebase, commits, tasks, and team notes.
             </p>
             <div className="flex flex-wrap gap-2">
               {SUGGESTIONS.map((s) => (

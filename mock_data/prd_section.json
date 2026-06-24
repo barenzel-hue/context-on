@@ -1,12 +1,26 @@
 {
-  "document": "ContextOn Product Requirements v2.1",
+  "document": "Product Requirements — Mobile Auth v2.3",
   "section": "3.2",
-  "title": "Seamless OAuth Login",
-  "content": "Section 3.2: Seamless OAuth login to increase user conversion. Users must complete authentication in under 3 seconds on first launch. Support Google and Microsoft SSO across iOS, Android, and Web. Zero visible error screens during the happy path. Conversion target: 78% signup completion (up from 62%).",
+  "title": "Seamless OAuth Login Across Platforms",
+  "stakeholder": "Growth Team + Enterprise Sales",
+  "content": "Users must be able to log in with Google or Microsoft SSO in under 3 seconds on first launch, with zero visible error screens during the happy path. This feature exists because our original email/password flow had a 62% signup completion rate — too many users dropped off at the 'create password' step. OAuth removes that friction entirely. The goal is 78% signup completion (tracked in Mixpanel under event: signup_completed). AuthService is the single owner of all auth state — no other service or component should read, write, or refresh tokens directly. This was a deliberate architectural decision to make auth auditable and replaceable as a unit. Platform support: Google OAuth on iOS 16+, Android 12+, and web. Microsoft OAuth on web and iOS only (Android enterprise support deferred to Q4 per sales roadmap). The state param is required for CSRF protection on all flows except where platform constraints make it impossible — in which case, compensating controls must be documented and reviewed by the security team before shipping.",
   "acceptance_criteria": [
-    "OAuth flow completes without user seeing more than one redirect",
-    "Session persists for 30 days without re-login",
-    "Works on Android 12+ and iOS 16+"
+    "OAuth flow completes without the user seeing more than one redirect screen",
+    "Session persists for 30 days without re-login on all supported platforms",
+    "Works on Android 12+ and iOS 16+ (Google), web + iOS (Microsoft)",
+    "Signup completion rate reaches 78% within 30 days of launch (Mixpanel)",
+    "All token operations go through AuthService — no direct token access elsewhere",
+    "Any bypass of CSRF controls must be logged, reviewed, and time-boxed",
+    "AuthService errors must never surface raw stack traces to the user"
   ],
-  "stakeholder": "Product – Growth Team"
+  "open_questions": [
+    "Microsoft OAuth on Android — deferred to Q4, no spec written yet. Do not implement.",
+    "Refresh token rotation — security team wants this in Q3. AuthService needs to support it without breaking existing sessions.",
+    "Biometric re-auth after 30-day expiry — UX spec pending from design team."
+  ],
+  "non_goals": [
+    "AuthService does NOT handle authorization (roles, permissions) — that's the PermissionsService.",
+    "AuthService does NOT own user profile data — auth tokens only.",
+    "In-house password auth was explicitly removed from scope after security review in Sprint 9."
+  ]
 }

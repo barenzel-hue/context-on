@@ -1,21 +1,84 @@
 {
   "task_id": 402,
-  "title": "Hotfix for Android Login loop",
-  "priority": "High",
-  "status": "In Progress",
+  "title": "Hotfix: Android OAuth Redirect Loop — Conference Blocker",
+  "priority": "Critical",
+  "status": "Done",
   "assignee": "Yossi Cohen",
   "board": "Mobile Sprint – Q2 2026",
+  "sprint": "Sprint 14",
   "due_date": "2026-06-20",
-  "description": "Users on Android 14+ are stuck in an infinite OAuth redirect loop after Google login. Reproduced on Samsung Galaxy S24 and Pixel 8. Must ship before Germany conference demo (June 22).",
+  "epic": "EP-11: Seamless Auth Across Platforms",
+  "description": "Users on Android 13+ are stuck in an infinite OAuth redirect loop after tapping 'Sign in with Google'. The loop repeats 3–5 times then drops to an error screen. Affects ~23% of Android users attempting login in production (Mixpanel, June 15–18). Highest repro rate on Samsung Galaxy S24 (Android 14) and Pixel 8 (Android 13). Zero repros on iOS or desktop. Conference demo is June 22 in Berlin — leadership needs a working login flow on stage. Ship hotfix by June 20 EOD.",
+  "acceptance_criteria": [
+    "Android users can complete Google OAuth login without a redirect loop",
+    "Login must complete in under 4 seconds on a Pixel 8 (target device for demo)",
+    "No visible error screens during the login flow",
+    "Session persists after app background/foreground on Android",
+    "Bypass path logged to Datadog (auth.bypass_active metric)"
+  ],
+  "linked_tasks": [
+    {
+      "id": 380,
+      "title": "Implement Google OAuth flow — iOS + Android",
+      "status": "Done",
+      "note": "Original implementation. State validation was added in this task as a security requirement from Maya."
+    },
+    {
+      "id": 391,
+      "title": "OAuth CSRF hardening — enforce state param validation",
+      "status": "Done",
+      "note": "This is the task that added the strict state check that the hotfix now bypasses. Do not revert Task 391 — the check is still active for non-Android paths."
+    },
+    {
+      "id": 398,
+      "title": "Investigate Android login failure reports (customer support spike)",
+      "status": "Done",
+      "note": "Root cause identified: Chrome 124 on Android WebView strips state param. Upstream Chromium bug filed. No ETA from Google."
+    },
+    {
+      "id": 415,
+      "title": "Proper Android WebView OAuth fix — replace state bypass with PKCE flow",
+      "status": "Planned – Q3 Sprint 17",
+      "note": "PKCE (Proof Key for Code Exchange) eliminates need for state param entirely. Longer implementation but correct solution. Blocked until Q3 due to conference timeline."
+    },
+    {
+      "id": 421,
+      "title": "Security review of bypass introduced in a3f8c21",
+      "status": "Planned – July 2026",
+      "note": "Maya to lead. Review scope: CSRF surface of skipStateCheck path, session storage handling, Datadog monitoring coverage."
+    }
+  ],
   "comments": [
     {
       "author": "Sarah (PM)",
-      "text": "Blocking demo — treat as P0 until conference."
+      "date": "2026-06-15",
+      "text": "Support inbox is filling up with Android login complaints. We have 4,000 registered users on Android — this is blocking ~900 of them from logging in at all. The Berlin demo is non-negotiable, we need a working build by Friday."
     },
     {
-      "author": "Yossi",
-      "text": "Root cause: WebView strips state param. Working on bypass."
+      "author": "Yossi Cohen",
+      "date": "2026-06-16",
+      "text": "Reproduced on my Pixel 7. Traced it to the state param being stripped by Chrome 124's WebView in-app browser. The state param is required by our CSRF check (Task 391). Without it, we throw, redirect to login, loop forever. Filed upstream bug with Chromium — no ETA. Shortest path: detect missing state on Android and exchange the code without verification."
+    },
+    {
+      "author": "Maya (Security Engineer)",
+      "date": "2026-06-17",
+      "text": "I reviewed the bypass approach. Accepting the risk under these conditions: (1) redirect_uri is strictly validated server-side, (2) the bypass path is logged so we can audit it, (3) we ship the PKCE replacement in Q3 before Android user base grows. Do NOT extend this pattern to Microsoft SSO or web paths — those don't have the same WebView constraint. Tagging for July security review."
+    },
+    {
+      "author": "David (Team Lead)",
+      "date": "2026-06-17",
+      "text": "Green light from security. Yossi, keep the bypass narrowly scoped to the Android path only — isAndroid() guard, bypass flag in sessionStorage, and a warning log to Datadog. Make sure the refresh cycle fix is in the same commit so we don't introduce a second loop. I'll add this to the tech-debt board for Q3."
+    },
+    {
+      "author": "Yossi Cohen",
+      "date": "2026-06-18",
+      "text": "Shipped in a3f8c21. Tested on S24, Pixel 8, Pixel 7 — all clear. Bypass active flag showing in Datadog. Refresh loop gone. Please don't touch auth.js without reading the comment block at the top — the bypass logic depends on both handleOAuthCallback and refreshAccessToken staying in sync."
+    },
+    {
+      "author": "Sarah (PM)",
+      "date": "2026-06-20",
+      "text": "Verified on conference device. Login works. Task closing. Flagging Task 415 and 421 as Q3 priorities so this doesn't become permanent."
     }
   ],
-  "summary": "Task #402: Hotfix for Android Login loop, High Priority, assigned to Yossi Cohen. Due before Germany conference demo."
+  "summary": "Task #402: Critical hotfix for Android OAuth redirect loop blocking the Berlin conference demo. Root cause: Chrome 124 WebView strips OAuth state param, breaking CSRF validation. Fix: conditional bypass for Android path with security sign-off. Linked to Q3 proper fix (Task 415) and July security review (Task 421)."
 }

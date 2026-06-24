@@ -1,0 +1,34 @@
+{
+  "AuthService": {
+    "code": "Handles login and authentication. Includes OAuth flow and session validation.",
+    "task": {
+      "id": "AUTH-402",
+      "description": "Fix Android WebView login issue causing missing OAuth state parameter"
+    },
+    "prd": "Section 3.2: Users must be able to log in seamlessly across all platforms",
+    "team_note": "Temporary hotfix for Germany demo. Do not refactor before security review.",
+    "recent_change": "Added workaround for WebView stripping OAuth state parameter"
+  },
+
+  "PaymentService": {
+    "code": "Handles checkout and payment processing with primary and fallback providers.",
+    "task": {
+      "id": "PAY-128",
+      "description": "Add fallback payment provider when primary gateway fails"
+    },
+    "prd": "Section 5.1: Payments must be resilient to provider failures",
+    "team_note": "Fallback provider is expensive, should only trigger on failure",
+    "recent_change": "Added fallback payment routing logic"
+  },
+
+  "OrderService": {
+    "code": "Manages order creation, tracking and lifecycle.",
+    "task": {
+      "id": "ORD-210",
+      "description": "Improve order tracking reliability"
+    },
+    "prd": "Section 4.0: Orders must be traceable in real-time",
+    "team_note": "Legacy service, partially refactored but still in transition",
+    "recent_change": "Improved order status update flow"
+  }
+}

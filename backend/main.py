@@ -1,7 +1,9 @@
 import json
 import os
+import subprocess
 from pathlib import Path
 
+import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,17 +17,31 @@ MOCK_DATA_DIR = BASE_DIR / "mock_data"
 load_dotenv(BASE_DIR / ".env")
 
 SYSTEM_PROMPT = (
-    "You are an AI Developer Onboarding Coach. Analyze the provided Git Diff, "
-    "Monday Task, PRD section, and Human Note. Generate a coherent, human-readable "
-    "narrative explaining WHY this code was changed, what constraints the developer "
-    "faced, and what the new developer should look out for."
+    "You are an AI Developer Onboarding Coach. "
+    "You will receive four layers of context: the project overview, the feature/task context, human notes from the team, and the code change. "
+    "The code change is supporting evidence only — it is not the main source of truth. "
+    "The main sources of truth are the task context and human notes, which explain the real reason this change exists. "
+    "Your job is to explain why this change exists at the system and feature level: "
+    "what product problem it solves, what constraints or decisions shaped it, and what a developer should watch out for. "
+    "Explain this at a system/feature level, not as a commit summary. "
+    "Do NOT describe what lines changed, do NOT summarize the diff, do NOT lead with the code. "
+    "Lead with the product problem. Use the code only to illustrate decisions that were already explained by the context."
 )
 
 CHAT_SYSTEM_PROMPT = (
-    "You are an AI Developer Onboarding Coach helping a new developer understand "
-    "a specific code change. You have full context from the Git diff, Monday task, "
-    "PRD section, and a note from the team lead. Answer follow-up questions clearly, "
-    "concisely, and honestly — including technical debt and risks when relevant."
+    "You are a developer assistant embedded in a codebase. "
+    "You have access to four sources of context: "
+    "(1) project overview and structure, "
+    "(2) feature and task context explaining why changes were requested, "
+    "(3) human notes with warnings, constraints, and team decisions, "
+    "(4) the code change itself as supporting evidence. "
+    "When answering questions: "
+    "always explain WHY something exists in the system, not just what it does; "
+    "combine all available context sources into one coherent answer; "
+    "prefer feature and product reasoning over commit-level technical details; "
+    "maintain the thread of the conversation — if the developer is drilling into a topic, go deeper; "
+    "flag technical debt, risks, and temporary decisions whenever they are relevant; "
+    "keep answers developer-friendly: clear, direct, and honest."
 )
 
 app = FastAPI(title="ContextOn API", version="1.0.0")
@@ -40,6 +56,7 @@ app.add_middleware(
 
 _context_cache: dict | None = None
 _story_cache: str | None = None
+_runtime_config: dict = {}
 
 
 def load_mock_data() -> dict:
@@ -48,6 +65,7 @@ def load_mock_data() -> dict:
         "monday_task": "monday_task.json",
         "prd_section": "prd_section.json",
         "human_note": "human_note.json",
+        "services": "services.json",
     }
     data = {}
     for key, filename in files.items():
@@ -59,39 +77,103 @@ def load_mock_data() -> dict:
     return data
 
 
+def _format_human_notes(human) -> str:
+    notes = human if isinstance(human, list) else [human]
+    lines = []
+    for n in notes:
+        tags = ", ".join(n.get("tags", []))
+        lines.append(
+            f"{n.get('author', 'unknown')} ({n.get('date', '')}):\n"
+            f"{n.get('note', '')}\n"
+            + (f"Tags: {tags}" if tags else "")
+        )
+    return "\n\n".join(lines)
+
+
+def _format_services(services: dict) -> str:
+    lines = []
+    for name, info in services.items():
+        task = info.get("task", {})
+        lines.append(
+            f"- {name}: {info.get('code', '')}\n"
+            f"  PRD: {info.get('prd', '')}\n"
+            f"  Linked task ({task.get('id', '—')}): {task.get('description', '')}\n"
+            f"  Recent change: {info.get('recent_change', '')}\n"
+            f"  Team note: {info.get('team_note', '')}"
+        )
+    return "\n\n".join(lines)
+
+
 def build_context_string(data: dict) -> str:
     git = data["git_diff"]
     monday = data["monday_task"]
     prd = data["prd_section"]
     human = data["human_note"]
+    services = data.get("services", {})
 
-    return f"""## Git Diff
+    services_block = _format_services(services) if services else "No service map available."
+
+    open_q = prd.get("open_questions", [])
+    non_goals = prd.get("non_goals", [])
+    open_q_str = "\n".join(f"  - {q}" for q in open_q) if open_q else "  None listed."
+    non_goals_str = "\n".join(f"  - {g}" for g in non_goals) if non_goals else "  None listed."
+
+    linked = monday.get("linked_tasks", [])
+    linked_str = "\n".join(
+        f"  - Task {t['id']}: {t['title']} [{t['status']}]" + (f" — {t['note']}" if t.get("note") else "")
+        for t in linked
+    ) if linked else "  None listed."
+
+    comments = monday.get("comments", [])
+    comments_str = "\n".join(
+        f"  {c['author']} ({c.get('date', '')}): {c['text']}"
+        for c in comments
+    ) if comments else "  None."
+
+    return f"""## Layer 0: Codebase Service Map
+This is a directory of the key services in the codebase — what each one does, why it exists, and what recently changed.
+
+{services_block}
+
+## Layer 1: Project & Product Context
+Product: {prd.get('document', 'Unknown')}
+Feature: {prd.get('section', '')} — {prd.get('title', '')}
+Stakeholder: {prd.get('stakeholder', '')}
+Goal: {prd.get('content', '')}
+Acceptance criteria:
+{chr(10).join(f"  - {c}" for c in prd.get('acceptance_criteria', []))}
+Open questions (deferred):
+{open_q_str}
+Explicitly out of scope:
+{non_goals_str}
+
+## Layer 2: Task & Business Context
+Task #{monday.get('task_id', '—')}: {monday.get('title', '')}
+Epic: {monday.get('epic', '—')} | Sprint: {monday.get('sprint', '—')}
+Priority: {monday.get('priority', '')} | Status: {monday.get('status', '')}
+Assignee: {monday.get('assignee', '')} | Due: {monday.get('due_date', '')}
+Why this task existed: {monday.get('description', '')}
+Linked tasks:
+{linked_str}
+Discussion thread:
+{comments_str}
+
+## Layer 3: Human Notes & Warnings
+{_format_human_notes(human)}
+
+## Layer 4: Code Change (supporting evidence only)
 File: {git.get('file', 'unknown')}
-Commit: {git.get('commit', 'unknown')} by {git.get('author', 'unknown')}
-Message: {git.get('message', '')}
+Author: {git.get('author', 'unknown')}
+Summary: {git.get('message', '')}
 
 ```diff
 {git.get('diff', '')}
 ```
-
-## Monday.com Task
-{monday.get('summary', monday.get('title', ''))}
-Status: {monday.get('status', '')} | Priority: {monday.get('priority', '')}
-Description: {monday.get('description', '')}
-
-## PRD Section
-{prd.get('section', '')}: {prd.get('title', '')}
-{prd.get('content', '')}
-Acceptance criteria: {', '.join(prd.get('acceptance_criteria', []))}
-
-## Human Note (Team Lead)
-From {human.get('author', 'unknown')} ({human.get('date', '')}):
-{human.get('note', '')}
 """
 
 
 def get_gemini_client() -> genai.Client | None:
-    api_key = os.getenv("GEMINI_API_KEY")
+    api_key = _runtime_config.get("gemini_api_key") or os.getenv("GEMINI_API_KEY", "")
     if not api_key:
         return None
     return genai.Client(api_key=api_key)
@@ -320,8 +402,15 @@ def _fallback_response(context: str, messages: list[dict] | None) -> str:
     return DEMO_CHAT_RESPONSES["default"]
 
 
+class RuntimeConfigRequest(BaseModel):
+    monday_api_key: str = ""
+    repo_path: str = ""
+    gemini_api_key: str = ""
+
+
 class ChatRequest(BaseModel):
     message: str
+    history: list[dict] = []
 
 
 class ChatResponse(BaseModel):
@@ -378,12 +467,224 @@ def get_context_story():
 
 
 def build_custom_context_string(req: AnalyzeRequest) -> str:
-    parts = [f"## Git Diff\n```diff\n{req.git_diff}\n```"]
+    parts = []
+
     if req.task.strip():
-        parts.append(f"## Task / Why this change\n{req.task}")
+        parts.append(f"## Layer 2: Feature & Task Context\nWhy this change was made: {req.task}")
+    else:
+        parts.append("## Layer 2: Feature & Task Context\nNo task context provided.")
+
     if req.notes.strip():
-        parts.append(f"## Team Notes\n{req.notes}")
+        parts.append(f"## Layer 3: Human Notes & Warnings\n{req.notes}")
+    else:
+        parts.append("## Layer 3: Human Notes & Warnings\nNo team notes provided.")
+
+    parts.append(f"## Layer 4: Code Change (supporting evidence only)\n```diff\n{req.git_diff}\n```")
+
     return "\n\n".join(parts)
+
+
+# ── Repo integration ─────────────────────────────────────────────────────────
+
+def get_repo_path() -> Path | None:
+    p = (_runtime_config.get("repo_path") or os.getenv("REPO_PATH", "")).strip()
+    if not p:
+        return None
+    path = Path(p).expanduser().resolve()
+    return path if path.is_dir() else None
+
+
+def get_monday_key() -> str:
+    return (_runtime_config.get("monday_api_key") or os.getenv("MONDAY_API_KEY", "")).strip()
+
+
+MONDAY_API_URL = "https://api.monday.com/v2"
+
+
+def monday_query(api_key: str, query: str) -> dict:
+    try:
+        r = httpx.post(
+            MONDAY_API_URL,
+            headers={"Authorization": api_key, "Content-Type": "application/json"},
+            json={"query": query},
+            timeout=10,
+        )
+        r.raise_for_status()
+        return r.json()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=f"Monday API error: {e.response.text}") from e
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=503, detail=f"Could not reach Monday.com: {e}") from e
+
+
+def run_git(repo: Path, *args) -> str:
+    try:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=str(repo),
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        return result.stdout.strip()
+    except Exception:
+        return ""
+
+
+def read_project_overview(repo: Path) -> str:
+    parts = []
+    for name in ["README.md", "README.txt", "README"]:
+        p = repo / name
+        if p.exists():
+            text = p.read_text(encoding="utf-8", errors="ignore")[:1500]
+            parts.append(f"Project README:\n{text}")
+            break
+    for name in ["package.json"]:
+        p = repo / name
+        if p.exists():
+            try:
+                d = json.loads(p.read_text())
+                if d.get("name") or d.get("description"):
+                    parts.append(f"Project: {d.get('name', '')} — {d.get('description', '')}")
+            except Exception:
+                pass
+    return "\n\n".join(parts) or "No project overview found."
+
+
+def list_commits(repo: Path, limit: int = 30) -> list[dict]:
+    out = run_git(repo, "log", f"-{limit}", "--pretty=format:%H|%an|%ad|%s", "--date=short")
+    commits = []
+    for line in out.splitlines():
+        parts = line.split("|", 3)
+        if len(parts) == 4:
+            h, author, date, msg = parts
+            commits.append({
+                "hash": h[:7],
+                "full_hash": h,
+                "author": author,
+                "date": date,
+                "message": msg,
+            })
+    return commits
+
+
+def get_commit_detail(repo: Path, commit_hash: str) -> dict:
+    meta = run_git(repo, "log", "-1", "--pretty=format:%an|%ad|%s|%b", "--date=short", commit_hash)
+    parts = meta.split("|", 3)
+    author = parts[0] if len(parts) > 0 else ""
+    date = parts[1] if len(parts) > 1 else ""
+    subject = parts[2] if len(parts) > 2 else ""
+    body = (parts[3] or "").strip() if len(parts) > 3 else ""
+
+    files_out = run_git(repo, "show", "--name-only", "--pretty=format:", commit_hash)
+    file_list = [f for f in files_out.splitlines() if f.strip()]
+
+    diff = run_git(repo, "show", commit_hash, "--unified=5")
+
+    return {
+        "hash": commit_hash[:7],
+        "full_hash": commit_hash,
+        "author": author,
+        "date": date,
+        "message": subject,
+        "body": body,
+        "files": file_list,
+        "diff": diff,
+    }
+
+
+def build_repo_context_string(overview: str, detail: dict) -> str:
+    files_str = "\n".join(f"  - {f}" for f in detail["files"]) or "  (no files listed)"
+    body_line = f"Details: {detail['body']}" if detail.get("body") else ""
+    return f"""## Layer 1: Project Overview
+{overview}
+
+## Layer 2: Feature & Task Context
+Commit by {detail['author']} on {detail['date']}
+Summary: {detail['message']}
+{body_line}
+Files changed:
+{files_str}
+
+## Layer 3: Human Notes & Warnings
+No linked task or team notes available for this commit. Infer intent from the commit message, the project context, and the code.
+
+## Layer 4: Code Change (supporting evidence only)
+```diff
+{detail['diff']}
+```
+"""
+
+
+@app.get("/api/repo/status")
+def repo_status():
+    repo = get_repo_path()
+    if not repo:
+        return {"connected": False}
+    toplevel = run_git(repo, "rev-parse", "--show-toplevel")
+    if not toplevel:
+        return {"connected": False, "error": "Not a git repository"}
+    branch = run_git(repo, "rev-parse", "--abbrev-ref", "HEAD")
+    return {
+        "connected": True,
+        "path": str(repo),
+        "name": Path(toplevel).name,
+        "branch": branch,
+    }
+
+
+@app.get("/api/repo/commits")
+def get_repo_commits(limit: int = 30):
+    repo = get_repo_path()
+    if not repo:
+        raise HTTPException(status_code=400, detail="No repository configured. Set REPO_PATH in .env")
+    return {"commits": list_commits(repo, limit)}
+
+
+@app.get("/api/repo/commits/{commit_hash}", response_model=ContextStoryResponse)
+def explain_repo_commit(commit_hash: str):
+    global _context_cache
+    repo = get_repo_path()
+    if not repo:
+        raise HTTPException(status_code=400, detail="No repository configured. Set REPO_PATH in .env")
+
+    detail = get_commit_detail(repo, commit_hash)
+    overview = read_project_overview(repo)
+    context = build_repo_context_string(overview, detail)
+
+    raw_sources = {
+        "git_diff": {
+            "file": ", ".join(detail["files"][:3]) or detail["hash"],
+            "commit": detail["hash"],
+            "author": detail["author"],
+            "date": detail["date"],
+            "message": detail["message"],
+            "diff": detail["diff"],
+        },
+        "monday_task": {
+            "task_id": "—",
+            "title": detail["message"],
+            "priority": "—",
+            "status": "—",
+            "assignee": detail["author"],
+            "due_date": detail["date"],
+            "description": detail.get("body") or "No task linked to this commit.",
+            "comments": [],
+        },
+        "human_note": {
+            "author": "—",
+            "date": detail["date"],
+            "note": "No team notes available for this commit.",
+            "tags": [],
+        },
+    }
+
+    _context_cache = {"data": raw_sources, "context": context}
+    story = call_llm(SYSTEM_PROMPT, context)
+    return ContextStoryResponse(story=story, raw_sources=raw_sources)
+
+
+# ── End repo integration ──────────────────────────────────────────────────────
 
 
 @app.post("/api/analyze", response_model=AnalyzeResponse)
@@ -450,17 +751,117 @@ def chat(request: ChatRequest):
             raise HTTPException(status_code=500, detail=str(e)) from e
 
     context = _context_cache["context"]
-    messages = [
+
+    # Anchor: always inject the full context as the first exchange so the model
+    # has all four layers on every turn, then replay the real conversation history.
+    anchor = [
         {
             "role": "user",
-            "content": f"Here is the full context about the code change:\n\n{context}",
+            "content": (
+                "Here is the full context for the code you will be asked about. "
+                "It includes the project overview, feature/task context, human notes, "
+                "and the code change as supporting evidence.\n\n"
+                f"{context}"
+            ),
         },
         {
             "role": "assistant",
-            "content": "I've reviewed the Git diff, Monday task, PRD section, and team lead note. Ask me anything about this change.",
+            "content": (
+                "I have reviewed all four context layers: the project overview, "
+                "the feature and task context, the team notes, and the code change. "
+                "Ask me anything — I'll explain why this code exists, what problem it solves, "
+                "and any tradeoffs or constraints involved."
+            ),
         },
-        {"role": "user", "content": request.message},
     ]
+
+    messages = anchor + request.history + [{"role": "user", "content": request.message}]
 
     reply = call_llm(CHAT_SYSTEM_PROMPT, "", messages=messages)
     return ChatResponse(reply=reply)
+
+
+# ── Runtime config ────────────────────────────────────────────────────────────
+
+
+@app.post("/api/config")
+def set_config(config: RuntimeConfigRequest):
+    global _runtime_config
+    _runtime_config = {
+        "monday_api_key": config.monday_api_key.strip(),
+        "repo_path": config.repo_path.strip(),
+        "gemini_api_key": config.gemini_api_key.strip(),
+    }
+    return {"status": "ok"}
+
+
+@app.get("/api/config/status")
+def get_config_status():
+    return {
+        "monday_configured": bool(get_monday_key()),
+        "repo_configured": bool(get_repo_path()),
+        "gemini_configured": bool(
+            _runtime_config.get("gemini_api_key") or os.getenv("GEMINI_API_KEY", "")
+        ),
+    }
+
+
+# ── Monday.com integration ────────────────────────────────────────────────────
+
+
+@app.get("/api/monday/test")
+def test_monday_connection():
+    key = get_monday_key()
+    if not key:
+        raise HTTPException(status_code=400, detail="Monday API key not configured")
+    result = monday_query(key, "{ me { name email } }")
+    errors = result.get("errors")
+    if errors:
+        raise HTTPException(status_code=401, detail=errors[0].get("message", "Auth failed"))
+    me = result.get("data", {}).get("me", {})
+    return {"ok": True, "name": me.get("name", ""), "email": me.get("email", "")}
+
+
+@app.get("/api/monday/boards")
+def get_monday_boards():
+    key = get_monday_key()
+    if not key:
+        raise HTTPException(status_code=400, detail="Monday API key not configured")
+    result = monday_query(
+        key,
+        "{ boards(limit: 50, order_by: used_at) { id name description board_kind } }",
+    )
+    errors = result.get("errors")
+    if errors:
+        raise HTTPException(status_code=400, detail=errors[0].get("message", "Query failed"))
+    boards = result.get("data", {}).get("boards", [])
+    return {"boards": boards}
+
+
+@app.get("/api/monday/boards/{board_id}/items")
+def get_monday_items(board_id: str):
+    key = get_monday_key()
+    if not key:
+        raise HTTPException(status_code=400, detail="Monday API key not configured")
+    query = f"""{{
+      boards(ids: [{board_id}]) {{
+        items_page(limit: 50) {{
+          items {{
+            id
+            name
+            state
+            column_values {{
+              id
+              text
+            }}
+          }}
+        }}
+      }}
+    }}"""
+    result = monday_query(key, query)
+    errors = result.get("errors")
+    if errors:
+        raise HTTPException(status_code=400, detail=errors[0].get("message", "Query failed"))
+    boards = result.get("data", {}).get("boards", [])
+    items = boards[0]["items_page"]["items"] if boards else []
+    return {"items": items}
