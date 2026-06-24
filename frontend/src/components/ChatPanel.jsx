@@ -2,17 +2,36 @@ import { useState, useRef, useEffect } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { sendChatMessage } from '../api'
 
+const STORAGE_KEY = 'contexton-chat'
+
 const SUGGESTIONS = [
-  'Why didn\'t Yossi use a try-catch block here?',
-  'What security risks does skipStateCheck introduce?',
-  'When is this tech debt scheduled to be fixed?',
+  'What problem does this code solve?',
+  'Is there any risk I should know about?',
+  'What should I be careful about if I change this?',
 ]
 
-export default function ChatPanel({ disabled }) {
-  const [messages, setMessages] = useState([])
+export default function ChatPanel({ disabled, resetKey }) {
+  const [messages, setMessages] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem(STORAGE_KEY)) ?? []
+    } catch {
+      return []
+    }
+  })
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
   const bottomRef = useRef(null)
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(messages))
+  }, [messages])
+
+  useEffect(() => {
+    if (resetKey > 0) {
+      setMessages([])
+      localStorage.removeItem(STORAGE_KEY)
+    }
+  }, [resetKey])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -46,18 +65,30 @@ export default function ChatPanel({ disabled }) {
     }
   }
 
+  function clearChat() {
+    setMessages([])
+    localStorage.removeItem(STORAGE_KEY)
+  }
+
   return (
-    <section className="flex flex-[2] flex-col overflow-hidden rounded-xl border border-surface-border bg-surface-raised">
-      <div className="flex items-center gap-2 border-b border-surface-border px-5 py-3">
-        <span className="text-lg">🤖</span>
-        <h2 className="text-sm font-semibold text-white">Ask Follow-ups</h2>
+    <div className="flex h-full flex-col overflow-hidden">
+      <div className="flex flex-shrink-0 items-center gap-2 border-b border-surface-border px-6 py-3">
+        <span className="text-sm text-gray-500">Ask anything about this code</span>
+        {messages.length > 0 && (
+          <button
+            onClick={clearChat}
+            className="ml-auto text-xs text-gray-600 transition-colors hover:text-gray-400"
+          >
+            Clear
+          </button>
+        )}
       </div>
 
-      <div className="flex-1 overflow-y-auto px-5 py-4">
+      <div className="flex-1 overflow-y-auto px-6 py-4">
         {messages.length === 0 && !disabled && (
           <div className="space-y-3">
             <p className="text-sm text-gray-500">
-              Ask anything about this change — the coach has full context.
+              Ask anything — why it was written this way, what it does, what to watch out for.
             </p>
             <div className="flex flex-wrap gap-2">
               {SUGGESTIONS.map((s) => (
@@ -112,7 +143,7 @@ export default function ChatPanel({ disabled }) {
         <div ref={bottomRef} />
       </div>
 
-      <div className="border-t border-surface-border p-4">
+      <div className="flex-shrink-0 border-t border-surface-border px-6 py-4">
         <div className="flex gap-2">
           <textarea
             value={input}
@@ -120,9 +151,7 @@ export default function ChatPanel({ disabled }) {
             onKeyDown={handleKeyDown}
             disabled={disabled || sending}
             placeholder={
-              disabled
-                ? 'Waiting for context story…'
-                : 'Ask a follow-up question…'
+              disabled ? 'Waiting for context story…' : 'Ask a follow-up question…'
             }
             rows={2}
             className="flex-1 resize-none rounded-lg border border-surface-border bg-surface px-4 py-2.5 text-sm text-gray-200 placeholder-gray-500 outline-none transition-colors focus:border-accent disabled:opacity-50"
@@ -136,6 +165,6 @@ export default function ChatPanel({ disabled }) {
           </button>
         </div>
       </div>
-    </section>
+    </div>
   )
 }

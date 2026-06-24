@@ -21,3 +21,13 @@ export async function fetchSources() {
   if (!res.ok) throw new Error(`Failed to load sources (${res.status})`)
   return res.json()
 }
+
+export async function analyzeCustom({ git_diff, task = '', notes = '' }) {
+  const res = await fetch(`${API_BASE}/analyze`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ git_diff, task, notes }),
+  })
+  if (!res.ok) throw new Error(`Analysis failed (${res.status})`)
+  return res.json()
+}

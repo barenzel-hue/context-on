@@ -1,22 +1,44 @@
+import { useState } from 'react'
 import ReactMarkdown from 'react-markdown'
+
+function CopyButton({ text }) {
+  const [copied, setCopied] = useState(false)
+
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      // clipboard unavailable
+    }
+  }
+
+  return (
+    <button
+      onClick={handleCopy}
+      disabled={!text}
+      className="rounded px-2 py-1 text-xs text-gray-500 transition-colors hover:text-gray-300 disabled:opacity-0"
+    >
+      {copied ? '✓ Copied' : 'Copy'}
+    </button>
+  )
+}
 
 export default function ContextStory({ story, loading, error }) {
   return (
-    <section className="flex flex-[3] flex-col overflow-hidden rounded-xl border border-surface-border bg-surface-raised">
-      <div className="flex items-center gap-2 border-b border-surface-border px-5 py-3">
-        <span className="text-lg">✨</span>
-        <h2 className="text-sm font-semibold text-white">AI Context Story</h2>
-        <span className="ml-auto text-xs text-gray-500">
-          Unified narrative from all sources
-        </span>
+    <div className="flex h-full flex-col overflow-hidden">
+      <div className="flex flex-shrink-0 items-center border-b border-surface-border px-6 py-3">
+        <span className="text-sm text-gray-500">AI explanation of the logic behind this code</span>
+        <CopyButton text={story} />
       </div>
 
-      <div className="flex-1 overflow-y-auto px-5 py-4">
+      <div className="flex-1 overflow-y-auto px-6 py-5">
         {loading && (
           <div className="flex flex-col items-center justify-center gap-3 py-12">
             <div className="h-8 w-8 animate-spin rounded-full border-2 border-accent border-t-transparent" />
             <p className="text-sm text-gray-400">
-              Synthesizing context from Git, Monday, PRD &amp; team notes…
+              Reading the commit, task, requirement, and team note…
             </p>
           </div>
         )}
@@ -37,6 +59,6 @@ export default function ContextStory({ story, loading, error }) {
           </div>
         )}
       </div>
-    </section>
+    </div>
   )
 }
