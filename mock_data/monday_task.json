@@ -1,0 +1,21 @@
+{
+  "task_id": 402,
+  "title": "Hotfix for Android Login loop",
+  "priority": "High",
+  "status": "In Progress",
+  "assignee": "Yossi Cohen",
+  "board": "Mobile Sprint – Q2 2026",
+  "due_date": "2026-06-20",
+  "description": "Users on Android 14+ are stuck in an infinite OAuth redirect loop after Google login. Reproduced on Samsung Galaxy S24 and Pixel 8. Must ship before Germany conference demo (June 22).",
+  "comments": [
+    {
+      "author": "Sarah (PM)",
+      "text": "Blocking demo — treat as P0 until conference."
+    },
+    {
+      "author": "Yossi",
+      "text": "Root cause: WebView strips state param. Working on bypass."
+    }
+  ],
+  "summary": "Task #402: Hotfix for Android Login loop, High Priority, assigned to Yossi Cohen. Due before Germany conference demo."
+}

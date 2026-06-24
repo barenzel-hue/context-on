@@ -1,0 +1,6 @@
+{
+  "author": "David (Team Lead)",
+  "date": "2026-06-19",
+  "note": "This was a quick bypass hack to make the demo work for the Germany conference. Needs proper refactoring in Q3. Do NOT copy this pattern for new auth flows — we're accepting technical debt here because WebView state-loss is a platform bug we can't fix in 48 hours. Yossi knows the full context; ping him before touching auth.js. Security review scheduled for July.",
+  "tags": ["tech-debt", "android", "oauth", "conference-demo"]
+}

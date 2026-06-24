@@ -1,0 +1,8 @@
+{
+  "file": "src/auth/auth.js",
+  "commit": "a3f8c21",
+  "author": "Yossi Cohen",
+  "date": "2026-06-18T14:32:00Z",
+  "message": "hotfix: bypass token refresh loop on Android OAuth callback",
+  "diff": "--- a/src/auth/auth.js\n+++ b/src/auth/auth.js\n@@ -42,18 +42,31 @@ export async function handleOAuthCallback(params) {\n   const { code, state } = params;\n \n-  if (!code || !state) {\n-    throw new AuthError('Missing OAuth parameters');\n-  }\n-\n-  const tokens = await exchangeCodeForTokens(code);\n-  await validateAndStoreTokens(tokens);\n-  return redirectToDashboard();\n+  // HOTFIX: Android WebView drops state param on redirect — skip validation temporarily\n+  if (!code) {\n+    throw new AuthError('Missing OAuth code');\n+  }\n+\n+  let tokens;\n+  if (state) {\n+    tokens = await exchangeCodeForTokens(code, state);\n+  } else {\n+    // Bypass: exchange without state verification (Android-only path)\n+    tokens = await exchangeCodeForTokens(code, null, { skipStateCheck: true });\n+  }\n+\n+  await validateAndStoreTokens(tokens);\n+\n+  // Force session flag so refresh loop doesn't re-trigger on Android\n+  if (isAndroid()) {\n+    sessionStorage.setItem('oauth_bypass_active', 'true');\n+  }\n+\n+  return redirectToDashboard();\n }\n \n export async function refreshAccessToken() {\n+  if (sessionStorage.getItem('oauth_bypass_active') === 'true') {\n+    return getStoredAccessToken(); // skip refresh cycle\n+  }\n   const refreshToken = getStoredRefreshToken();\n   if (!refreshToken) throw new AuthError('No refresh token');\n   return await tokenService.refresh(refreshToken);\n }"
+}

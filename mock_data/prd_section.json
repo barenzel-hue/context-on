@@ -1,0 +1,12 @@
+{
+  "document": "ContextOn Product Requirements v2.1",
+  "section": "3.2",
+  "title": "Seamless OAuth Login",
+  "content": "Section 3.2: Seamless OAuth login to increase user conversion. Users must complete authentication in under 3 seconds on first launch. Support Google and Microsoft SSO across iOS, Android, and Web. Zero visible error screens during the happy path. Conversion target: 78% signup completion (up from 62%).",
+  "acceptance_criteria": [
+    "OAuth flow completes without user seeing more than one redirect",
+    "Session persists for 30 days without re-login",
+    "Works on Android 12+ and iOS 16+"
+  ],
+  "stakeholder": "Product – Growth Team"
+}
